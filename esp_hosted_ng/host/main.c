@@ -36,6 +36,8 @@ static int resetpin = HOST_GPIO_PIN_INVALID;
 static int readypin = HOST_GPIO_PIN_INVALID;
 static int handshakepin = HOST_GPIO_PIN_INVALID;
 static uint clockspeed = 0;
+static char* mode = "sdio";
+static int if_tp = ESP_IF_TYPE_SDIO;
 extern u8 ap_bssid[MAC_ADDR_LEN];
 
 module_param(resetpin, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
@@ -43,6 +45,9 @@ MODULE_PARM_DESC(resetpin, "Host's GPIO pin number which is connected to ESP32's
 
 module_param(clockspeed, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(clockspeed, "Hosts clock speed in MHz");
+
+module_param(mode, charp, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+MODULE_PARM_DESC(mode, "Mode either spi or sdio default is sdio");
 
 module_param(readypin, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(readypin, "Data ready pin default is pin 13, gpio27");
@@ -515,7 +520,10 @@ static void process_esp_bootup_event(struct esp_adapter *adapter,
 	}
 
 	printk (KERN_INFO "\nReceived ESP bootup event\n");
-	process_event_esp_bootup(adapter, evt->data, evt->len);
+	if(if_tp == ESP_IF_TYPE_SPI)
+		process_event_esp_bootup_spi(adapter, evt->data, evt->len);
+	else if(if_tp == ESP_IF_TYPE_SDIO)
+		process_event_esp_bootup_sdio(adapter, evt->data, evt->len);
 }
 
 static int process_internal_event(struct esp_adapter *adapter,
@@ -821,6 +829,11 @@ static int __init esp_init(void)
 	struct esp_adapter *adapter = NULL;
 	struct esp_if_params if_params;
 
+	if(strncmp(mode, "spi", 4) == 0)
+		if_tp = ESP_IF_TYPE_SPI;
+	else if(strncmp(mode, "sdio", 5) != 0)
+		printk(KERN_WARNING "%s, ESP32: Invalid protocall %s, defaulting to sdio.\n", __func__, mode);
+
 	/* Reset ESP, Clean start ESP */
 	esp_reset();
 	msleep(200);
@@ -834,7 +847,10 @@ static int __init esp_init(void)
 	if_params.handshake_pin = handshakepin;
 	if_params.data_ready_pin = readypin;
 	/* Init transport layer */
-	ret = esp_init_interface_layer(adapter, &if_params);
+	if(if_tp == ESP_IF_TYPE_SPI)
+		ret = esp_init_interface_layer_spi(adapter, &if_params);
+	else if(if_tp == ESP_IF_TYPE_SDIO)
+		ret = esp_init_interface_layer_sdio(adapter, &if_params);
 
 	if (ret != 0) {
 		deinit_adapter();
@@ -852,7 +868,10 @@ static void __exit esp_exit(void)
 	}
 	clear_bit(ESP_DRIVER_ACTIVE, &adapter.state_flags);
 
-	esp_deinit_interface_layer();
+	if(if_tp == ESP_IF_TYPE_SPI)
+		esp_deinit_interface_layer_spi();
+	else if(if_tp == ESP_IF_TYPE_SDIO)
+		esp_deinit_interface_layer_sdio();
 	deinit_adapter();
 
 	if (resetpin != HOST_GPIO_PIN_INVALID) {
