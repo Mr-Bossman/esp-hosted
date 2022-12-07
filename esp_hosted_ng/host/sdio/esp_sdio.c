@@ -17,6 +17,7 @@
  * this warranty disclaimer.
  */
 
+#include <linux/of.h>
 #include <linux/mutex.h>
 #include <linux/mmc/sdio.h>
 #include <linux/mmc/sdio_func.h>
@@ -30,6 +31,7 @@
 #include <linux/kthread.h>
 #include <linux/printk.h>
 
+#define NUMBER_1M               1000000
 #define MAX_WRITE_RETRIES       2
 #define TX_MAX_PENDING_COUNT    200
 #define TX_RESUME_THRESHOLD     (TX_MAX_PENDING_COUNT/5)
@@ -718,10 +720,18 @@ static int esp_probe(struct sdio_func *func,
 				  const struct sdio_device_id *id)
 {
 	struct esp_sdio_context *context = NULL;
+	uint32_t sdio_clk_mhz = 0;
 	int ret = 0;
 
 	if (func->num != 1) {
 		return -EINVAL;
+	}
+
+	/* The out_values is modified only if a valid u32 value can be decoded. */
+	if(sdio_context.sdio_clk_mhz == 0) {
+		of_property_read_u32(func->dev.of_node, "clock-rate", &sdio_clk_mhz);
+		if(sdio_clk_mhz != 0)
+			sdio_context.sdio_clk_mhz = sdio_clk_mhz/NUMBER_1M;
 	}
 
 	printk(KERN_INFO "%s: ESP network device detected\n", __func__);
@@ -771,12 +781,22 @@ static int esp_probe(struct sdio_func *func,
 	return ret;
 }
 
+static const struct of_device_id esp32_sdio_of_match[] = {
+	{ .compatible = "espressif,esp32_sdio", },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, esp32_sdio_of_match);
+
 /* SDIO driver structure to be registered with kernel */
 static struct sdio_driver esp_sdio_driver = {
 	.name		= "esp_sdio",
 	.id_table	= esp_devices,
 	.probe		= esp_probe,
 	.remove		= esp_remove,
+	.drv = {
+		.name = "esp32_sdio",
+		.of_match_table = esp32_sdio_of_match,
+	},
 };
 
 int esp_init_interface_layer_sdio(struct esp_adapter *adapter, const struct esp_if_params *params)
