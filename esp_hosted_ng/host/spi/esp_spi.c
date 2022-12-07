@@ -31,10 +31,15 @@
 #define TX_MAX_PENDING_COUNT    100
 #define TX_RESUME_THRESHOLD     (TX_MAX_PENDING_COUNT/5)
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 17, 0))
+typedef void REM_SPI_TYPE;
+#else
+typedef int REM_SPI_TYPE;
+#endif
 static struct sk_buff * read_packet(struct esp_adapter *adapter);
 static int write_packet(struct esp_adapter *adapter, struct sk_buff *skb);
-static void spi_exit(void);
-static int spi_init(void);
+static REM_SPI_TYPE esp32_bus_remove(struct spi_device *spi);
+static int esp32_bus_probe(struct spi_device *spi);
 static void adjust_spi_clock(u8 spi_clk_mhz);
 
 volatile u8 data_path = 0;
@@ -278,8 +283,7 @@ void process_event_esp_bootup(struct esp_adapter *adapter, u8 *evt_buf, u8 len)
 			if (priv->scan_in_progress)
 				ESP_MARK_SCAN_DONE(priv, true);
 
-			if (priv->ndev &&
-			    priv->wdev.current_bss) {
+			if (priv->ndev) {
 
 				CFG80211_DISCONNECTED(priv->ndev,
 						0, NULL, 0, false, GFP_KERNEL);
@@ -457,30 +461,16 @@ static void esp_spi_work(struct work_struct *work)
 	mutex_unlock(&spi_lock);
 }
 
-static int spi_dev_init(int spi_clk_mhz)
+static int spi_dev_init(struct spi_device *spi,int spi_clk_mhz)
 {
 	int status = 0;
 	struct spi_board_info esp_board = {{0}};
-	struct spi_master *master = NULL;
 
-	strlcpy(esp_board.modalias, "esp_spi", sizeof(esp_board.modalias));
-	esp_board.mode = SPI_MODE_2;
-	esp_board.max_speed_hz = spi_clk_mhz * NUMBER_1M;
-	esp_board.bus_num = 0;
-	esp_board.chip_select = 0;
+	strlcpy(spi->modalias, "esp_spi", sizeof(esp_board.modalias));
+	spi->mode = SPI_MODE_2;
+	spi->max_speed_hz = spi_clk_mhz * NUMBER_1M;
 
-	master = spi_busnum_to_master(esp_board.bus_num);
-	if (!master) {
-		printk(KERN_ERR "Failed to obtain SPI master handle\n");
-		return -ENODEV;
-	}
-
-	spi_context.esp_spi_dev = spi_new_device(master, &esp_board);
-
-	if (!spi_context.esp_spi_dev) {
-		printk(KERN_ERR "Failed to add new SPI device\n");
-		return -ENODEV;
-	}
+	spi_context.esp_spi_dev = spi;
 
 	status = spi_setup(spi_context.esp_spi_dev);
 
@@ -551,17 +541,30 @@ static int spi_dev_init(int spi_clk_mhz)
 	return 0;
 }
 
-static int spi_init(void)
+static int esp32_bus_probe(struct spi_device *spi)
 {
 	int status = 0;
 	uint8_t prio_q_idx = 0;
+	uint32_t spi_clk_mhz = 0;
 	struct esp_adapter *adapter;
+
+	/* The out_values is modified only if a valid u32 value can be decoded. */
+	if (spi_context.spi_clk_mhz == 0) {
+		of_property_read_u32(spi->dev.of_node, "clock-rate", &spi_clk_mhz);
+		if(spi_clk_mhz != 0)
+			spi_context.spi_clk_mhz = spi_clk_mhz/NUMBER_1M;
+	}
+
+	status = spi_dev_init(spi, spi_context.spi_clk_mhz);
+	if (status) {
+		printk (KERN_ERR "Failed Init SPI device\n");
+		return status;
+	}
 
 	spi_context.spi_workqueue = create_workqueue("ESP_SPI_WORK_QUEUE");
 
 	if (!spi_context.spi_workqueue) {
 		printk(KERN_ERR "spi workqueue failed to create\n");
-		spi_exit();
 		return -EFAULT;
 	}
 
@@ -572,33 +575,23 @@ static int spi_init(void)
 		skb_queue_head_init(&spi_context.rx_q[prio_q_idx]);
 	}
 
-	status = spi_dev_init(spi_context.spi_clk_mhz);
-	if (status) {
-		spi_exit();
-		printk (KERN_ERR "Failed Init SPI device\n");
-		return status;
-	}
-
 	adapter = spi_context.adapter;
 
-	if (!adapter) {
-		spi_exit();
+	if (!adapter)
 		return -EFAULT;
-	}
 
 	adapter->dev = &spi_context.esp_spi_dev->dev;
 
 	return status;
 }
 
-static void spi_exit(void)
+static REM_SPI_TYPE esp32_bus_remove(struct spi_device *spi)
 {
 	uint8_t prio_q_idx = 0;
 
 	disable_irq(SPI_IRQ);
 	disable_irq(SPI_DATA_READY_IRQ);
 	close_data_path();
-	msleep(200);
 
 	for (prio_q_idx=0; prio_q_idx<MAX_PRIORITY_QUEUES; prio_q_idx++) {
 		skb_queue_purge(&spi_context.tx_q[prio_q_idx]);
@@ -624,10 +617,10 @@ static void spi_exit(void)
 		gpio_free(SPI_DATA_READY_PIN);
 	}
 
-	if (spi_context.esp_spi_dev)
-		spi_unregister_device(spi_context.esp_spi_dev);
-
 	memset(&spi_context, 0, sizeof(spi_context));
+	#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0))
+		return 0;
+	#endif
 }
 
 static void adjust_spi_clock(u8 spi_clk_mhz)
@@ -638,6 +631,28 @@ static void adjust_spi_clock(u8 spi_clk_mhz)
 		spi_context.esp_spi_dev->max_speed_hz = spi_clk_mhz * NUMBER_1M;
 	}
 }
+
+static const struct spi_device_id esp32_spi_id[] = {
+	{ "esp32_spi", 0 },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(spi, esp32_spi_id);
+
+static const struct of_device_id esp32_spi_of_match[] = {
+	{ .compatible = "espressif,esp32_spi", },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, esp32_spi_of_match);
+
+static struct spi_driver esp32_spi_driver = {
+	.driver = {
+		.name = "esp32_spi",
+		.of_match_table = esp32_spi_of_match,
+	},
+	.id_table = esp32_spi_id,
+	.probe =  esp32_bus_probe,
+	.remove = esp32_bus_remove,
+};
 
 int esp_init_interface_layer(struct esp_adapter *adapter)
 {
@@ -652,10 +667,10 @@ int esp_init_interface_layer(struct esp_adapter *adapter)
 	spi_context.adapter = adapter;
 	spi_context.spi_clk_mhz = SPI_INITIAL_CLK_MHZ;
 
-	return spi_init();
+	return spi_register_driver(&esp32_spi_driver);
 }
 
 void esp_deinit_interface_layer(void)
 {
-	spi_exit();
+	spi_unregister_driver(&esp32_spi_driver);
 }
