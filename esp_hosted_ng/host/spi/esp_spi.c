@@ -276,8 +276,8 @@ static void esp_spi_work(struct work_struct *work)
 
 	mutex_lock(&spi_lock);
 
-	trans_ready = gpio_get_value(HANDSHAKE_PIN);
-	rx_pending = gpio_get_value(SPI_DATA_READY_PIN);
+	trans_ready = gpio_get_value(spi_context.handshake_pin);
+	rx_pending = gpio_get_value(spi_context.data_ready_pin);
 
 	if (trans_ready) {
 		if (data_path) {
@@ -447,54 +447,54 @@ static int spi_dev_init(int spi_clk_mhz)
 			esp_board.bus_num,
 			esp_board.chip_select, spi_clk_mhz);
 
-	status = gpio_request(HANDSHAKE_PIN, "SPI_HANDSHAKE_PIN");
+	status = gpio_request(spi_context.handshake_pin, "spi_context.handshake_pin");
 
 	if (status) {
 		esp_err("Failed to obtain GPIO for Handshake pin, err:%d\n", status);
 		return status;
 	}
 
-	status = gpio_direction_input(HANDSHAKE_PIN);
+	status = gpio_direction_input(spi_context.handshake_pin);
 
 	if (status) {
-		gpio_free(HANDSHAKE_PIN);
+		gpio_free(spi_context.handshake_pin);
 		esp_err("Failed to set GPIO direction of Handshake pin, err: %d\n", status);
 		return status;
 	}
 
-	status = request_irq(SPI_IRQ, spi_interrupt_handler,
+	status = request_irq(gpio_to_irq(spi_context.handshake_pin), spi_interrupt_handler,
 			IRQF_SHARED | IRQF_TRIGGER_RISING,
 			"ESP_SPI", spi_context.esp_spi_dev);
 	if (status) {
-		gpio_free(HANDSHAKE_PIN);
+		gpio_free(spi_context.handshake_pin);
 		esp_err("Failed to request IRQ for Handshake pin, err:%d\n", status);
 		return status;
 	}
 
-	status = gpio_request(SPI_DATA_READY_PIN, "SPI_DATA_READY_PIN");
+	status = gpio_request(spi_context.data_ready_pin, "spi_context.data_ready_pin");
 	if (status) {
-		gpio_free(HANDSHAKE_PIN);
-		free_irq(SPI_IRQ, spi_context.esp_spi_dev);
+		gpio_free(spi_context.handshake_pin);
+		free_irq(gpio_to_irq(spi_context.handshake_pin), spi_context.esp_spi_dev);
 		esp_err("Failed to obtain GPIO for Data ready pin, err:%d\n", status);
 		return status;
 	}
 
-	status = gpio_direction_input(SPI_DATA_READY_PIN);
+	status = gpio_direction_input(spi_context.data_ready_pin);
 	if (status) {
-		gpio_free(HANDSHAKE_PIN);
-		free_irq(SPI_IRQ, spi_context.esp_spi_dev);
-		gpio_free(SPI_DATA_READY_PIN);
+		gpio_free(spi_context.handshake_pin);
+		free_irq(gpio_to_irq(spi_context.handshake_pin), spi_context.esp_spi_dev);
+		gpio_free(spi_context.data_ready_pin);
 		esp_err("Failed to set GPIO direction of Data ready pin\n");
 		return status;
 	}
 
-	status = request_irq(SPI_DATA_READY_IRQ, spi_data_ready_interrupt_handler,
+	status = request_irq(gpio_to_irq(spi_context.data_ready_pin), spi_data_ready_interrupt_handler,
 			IRQF_SHARED | IRQF_TRIGGER_RISING,
 			"ESP_SPI_DATA_READY", spi_context.esp_spi_dev);
 	if (status) {
-		gpio_free(HANDSHAKE_PIN);
-		free_irq(SPI_IRQ, spi_context.esp_spi_dev);
-		gpio_free(SPI_DATA_READY_PIN);
+		gpio_free(spi_context.handshake_pin);
+		free_irq(gpio_to_irq(spi_context.handshake_pin), spi_context.esp_spi_dev);
+		gpio_free(spi_context.data_ready_pin);
 		esp_err("Failed to request IRQ for Data ready pin, err:%d\n", status);
 		return status;
 	}
@@ -549,8 +549,8 @@ static void spi_exit(void)
 {
 	uint8_t prio_q_idx = 0;
 
-	disable_irq(SPI_IRQ);
-	disable_irq(SPI_DATA_READY_IRQ);
+	disable_irq(gpio_to_irq(spi_context.handshake_pin));
+	disable_irq(gpio_to_irq(spi_context.data_ready_pin));
 	close_data_path();
 	msleep(200);
 
@@ -571,11 +571,11 @@ static void spi_exit(void)
 		esp_deinit_bt(spi_context.adapter);
 
 	if (spi_context.spi_gpio_enabled) {
-		free_irq(SPI_IRQ, spi_context.esp_spi_dev);
-		free_irq(SPI_DATA_READY_IRQ, spi_context.esp_spi_dev);
+		free_irq(gpio_to_irq(spi_context.handshake_pin), spi_context.esp_spi_dev);
+		free_irq(gpio_to_irq(spi_context.data_ready_pin), spi_context.esp_spi_dev);
 
-		gpio_free(HANDSHAKE_PIN);
-		gpio_free(SPI_DATA_READY_PIN);
+		gpio_free(spi_context.handshake_pin);
+		gpio_free(spi_context.data_ready_pin);
 	}
 
 	if (spi_context.esp_spi_dev)
@@ -600,7 +600,7 @@ int esp_adjust_spi_clock(struct esp_adapter *adapter, u8 spi_clk_mhz)
 	return 0;
 }
 
-int esp_init_interface_layer(struct esp_adapter *adapter, u32 speed)
+int esp_init_interface_layer(struct esp_adapter *adapter, const struct esp_if_params *params)
 {
 	if (!adapter)
 		return -EINVAL;
@@ -611,10 +611,10 @@ int esp_init_interface_layer(struct esp_adapter *adapter, u32 speed)
 	adapter->if_ops = &if_ops;
 	adapter->if_type = ESP_IF_TYPE_SPI;
 	spi_context.adapter = adapter;
-	if (speed)
-		spi_context.spi_clk_mhz = speed;
-	else
-		spi_context.spi_clk_mhz = SPI_INITIAL_CLK_MHZ;
+	spi_context.data_ready_pin = params->data_ready_pin;
+	spi_context.handshake_pin = params->handshake_pin;
+	if(params->speed)
+		spi_context.spi_clk_mhz = params->speed;
 
 	return spi_init();
 }

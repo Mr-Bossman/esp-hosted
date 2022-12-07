@@ -26,6 +26,8 @@
 #define HOST_GPIO_PIN_INVALID -1
 #define CONFIG_ALLOW_MULTICAST_WAKEUP 1
 static int resetpin = HOST_GPIO_PIN_INVALID;
+static int readypin = HOST_GPIO_PIN_INVALID;
+static int handshakepin = HOST_GPIO_PIN_INVALID;
 static u32 clockspeed = 0;
 extern u8 ap_bssid[MAC_ADDR_LEN];
 extern volatile u8 host_sleep;
@@ -40,6 +42,12 @@ MODULE_PARM_DESC(clockspeed, "Hosts clock speed in MHz");
 
 module_param(raw_tp_mode, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(raw_tp_mode, "Mode choosed to test raw throughput");
+
+module_param(readypin, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+MODULE_PARM_DESC(readypin, "Data ready pin default is pin 13, gpio27");
+
+module_param(handshakepin, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+MODULE_PARM_DESC(handshakepin, "Handshake pin default is pin 15, gpio22");
 
 static void deinit_adapter(void);
 
@@ -989,6 +997,7 @@ static int __init esp_init(void)
 {
 	int ret = 0;
 	struct esp_adapter *adapter = NULL;
+	struct esp_if_params if_params;
 
 	/* Reset ESP, Clean start ESP */
 	esp_reset();
@@ -999,8 +1008,11 @@ static int __init esp_init(void)
 	if (!adapter)
 		return -EFAULT;
 
+	if_params.speed = clockspeed;
+	if_params.handshake_pin = handshakepin;
+	if_params.data_ready_pin = readypin;
 	/* Init transport layer */
-	ret = esp_init_interface_layer(adapter, clockspeed);
+	ret = esp_init_interface_layer(adapter, &if_params);
 
 	if (ret != 0) {
 		deinit_adapter();
