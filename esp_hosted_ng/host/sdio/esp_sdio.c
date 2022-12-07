@@ -5,7 +5,12 @@
  * SPDX-FileCopyrightText: 2015-2023 Espressif Systems (Shanghai) CO LTD
  *
  */
+<<<<<<< HEAD
 #include "utils.h"
+=======
+
+#include <linux/of.h>
+>>>>>>> fd28fde (Allow SDIO to match on the device tree)
 #include <linux/mutex.h>
 #include <linux/mmc/sdio.h>
 #include <linux/mmc/sdio_func.h>
@@ -776,10 +781,18 @@ static int esp_probe(struct sdio_func *func,
 				  const struct sdio_device_id *id)
 {
 	struct esp_sdio_context *context = NULL;
+	uint32_t sdio_clk_mhz = 0;
 	int ret = 0;
 
 	if (func->num != 1) {
 		return -EINVAL;
+	}
+
+	/* The out_values is modified only if a valid u32 value can be decoded. */
+	if(sdio_context.sdio_clk_mhz == 0) {
+		of_property_read_u32(func->dev.of_node, "clock-rate", &sdio_clk_mhz);
+		if(sdio_clk_mhz != 0)
+			sdio_context.sdio_clk_mhz = sdio_clk_mhz/1000000;
 	}
 
 	esp_info("ESP network device detected\n");
