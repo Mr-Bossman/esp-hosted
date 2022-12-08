@@ -39,7 +39,7 @@ static struct sk_buff * read_packet(struct esp_adapter *adapter);
 static int write_packet(struct esp_adapter *adapter, struct sk_buff *skb);
 static REM_SPI_TYPE esp32_bus_remove(struct spi_device *spi);
 static int esp32_bus_probe(struct spi_device *spi);
-static void adjust_spi_clock(u8 spi_clk_mhz);
+//static void adjust_spi_clock(u8 spi_clk_mhz);
 
 volatile u8 data_path = 0;
 static struct esp_spi_context spi_context;
@@ -216,7 +216,7 @@ void process_event_esp_bootup_spi(struct esp_adapter *adapter, u8 *evt_buf, u8 l
 
 		} else if (*pos == ESP_BOOTUP_SPI_CLK_MHZ){
 
-			adjust_spi_clock(*(pos + 2));
+			//adjust_spi_clock(*(pos + 2));
 
 		} else if (*pos == ESP_BOOTUP_FIRMWARE_CHIP_ID){
 
@@ -625,6 +625,7 @@ static REM_SPI_TYPE esp32_bus_remove(struct spi_device *spi)
 	#endif
 }
 
+/*
 static void adjust_spi_clock(u8 spi_clk_mhz)
 {
 	if ((spi_clk_mhz) && (spi_clk_mhz != spi_context.spi_clk_mhz)) {
@@ -632,6 +633,7 @@ static void adjust_spi_clock(u8 spi_clk_mhz)
 		spi_context.spi_clk_mhz = spi_clk_mhz;
 	}
 }
+*/
 
 static const struct spi_device_id esp32_spi_id[] = {
 	{ "esp32_spi", 0 },

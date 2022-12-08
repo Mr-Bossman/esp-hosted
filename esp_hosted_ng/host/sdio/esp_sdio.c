@@ -734,7 +734,7 @@ static int esp_probe(struct sdio_func *func,
 			sdio_context.sdio_clk_mhz = sdio_clk_mhz/NUMBER_1M;
 	}
 
-	printk(KERN_INFO "%s: ESP network device detected\n", __func__);
+	//printk(KERN_INFO "%s: ESP network device detected\n", __func__);
 
 	context = init_sdio_func(func);
 

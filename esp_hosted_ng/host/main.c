@@ -796,10 +796,10 @@ static void deinit_adapter(void)
 static void esp_reset(void)
 {
 	/* Check valid GPIO or not */
-	if (!gpio_is_valid(resetpin)) {
+	/*if (!gpio_is_valid(resetpin)) {
 		printk(KERN_WARNING "%s, ESP32: host resetpin (%d) configured an is invalid GPIO defaulting to 6.\n", __func__, resetpin);
 		resetpin = 6;
-	}
+	}*/
 
 	/* Check valid GPIO or not */
 	if (!gpio_is_valid(resetpin)) {
