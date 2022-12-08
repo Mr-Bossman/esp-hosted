@@ -993,11 +993,31 @@ static void esp_reset(void)
 	}
 }
 
+void dt_get_reset_pin(void)
+{
+	struct device_node *resetpin_node = NULL;
+	int temp_resetpin = HOST_GPIO_PIN_INVALID;
+
+
+	resetpin_node = of_find_compatible_node(NULL, NULL, "espressif,esp_sdio");
+	if (!resetpin_node)
+		resetpin_node = of_find_compatible_node(NULL, NULL, "espressif,esp_spi");
+	if (resetpin_node){
+		of_property_read_u32(resetpin_node, "resetpin", &temp_resetpin);
+		if (temp_resetpin == HOST_GPIO_PIN_INVALID)
+			esp_warn("Unable to find resetpin in device tree.\n");
+		else
+			resetpin = temp_resetpin;
+	}
+}
+
 static int __init esp_init(void)
 {
 	int ret = 0;
 	struct esp_adapter *adapter = NULL;
 	struct esp_if_params if_params;
+
+	dt_get_reset_pin();
 
 	/* Reset ESP, Clean start ESP */
 	esp_reset();
